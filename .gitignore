@@ -1,0 +1,23 @@
+.ipynb_checkpoints/
+__pycache__/
+*.py[cod]
+.DS_Store
+.env
+.venv/
+venv/
+outputs/
+*.cif
+*.pdb
+!examples/exp_structures/*.cif
+aws_creds/
+.aws_creds/
+
+# notebook execution artifacts
+*.executed.ipynb
+*.log
+endpoint_name.txt
+
+# internal-only
+tests/
+FORWARD_PLAN.md
+.pytest_cache/

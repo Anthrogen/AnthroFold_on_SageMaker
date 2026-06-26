@@ -4,6 +4,10 @@ import time
 from pathlib import Path
 
 import boto3
+from botocore.exceptions import ClientError
+
+# S3 error codes worth retrying while polling for an async result (transient).
+_RETRYABLE_S3 = {"SlowDown", "RequestTimeout", "ServiceUnavailable", "InternalError", "Throttling", "ThrottlingException"}
 
 
 class AsyncInferenceFailure(RuntimeError):
@@ -165,6 +169,11 @@ def wait_for_result(
             return json.loads(obj["Body"].read())
         except s3_client.exceptions.NoSuchKey:
             pass
+        except ClientError as exc:
+            # Retry transient S3 errors (throttling / brief outages); surface real
+            # ones (AccessDenied, NoSuchBucket, ...) immediately.
+            if exc.response.get("Error", {}).get("Code") not in _RETRYABLE_S3:
+                raise
 
         if fail_bucket and fail_key:
             try:
@@ -185,8 +194,9 @@ def wait_for_result(
 
 def summarize_predictions(result):
     rows = []
-    for pred in result.get("predictions", []):
-        summary = pred.get("confidence", {}).get("summary", {}) or {}
+    for pred in result.get("predictions") or []:
+        conf = pred.get("confidence", {}) or {}
+        summary = conf.get("summary", conf)  # handler may nest metrics under 'summary' or return them flat
         rows.append(
             {
                 "name": pred.get("name", "<unnamed>"),
@@ -209,7 +219,7 @@ def save_predictions(result, output_dir="outputs", prefix=None):
     confidence_dir.mkdir(parents=True, exist_ok=True)
 
     saved = []
-    for pred in result.get("predictions", []):
+    for pred in result.get("predictions") or []:
         name = safe_name(str(pred.get("name", "prediction")))
         stem = f"{safe_name(prefix)}_{name}" if prefix else name
         cif_path = cif_dir / f"{stem}.cif"

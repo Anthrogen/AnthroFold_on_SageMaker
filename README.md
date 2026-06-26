@@ -6,15 +6,16 @@ The model package and SageMaker endpoint are hosted in `us-east-1`. You can run 
 
 ## End-to-End Workflow
 
-The five notebooks are intended to be run in order:
+The six notebooks are intended to be run in order:
 
 1. **`1-deploy-endpoint.ipynb`** — Stand up an async SageMaker endpoint from the model package ARN. Documents the input CSV format. Writes `endpoint_name.txt` for the other notebooks to read. Initial deployment takes ~1 hour while the container downloads bundled MSA databases (see [Cold Start](#cold-start)).
 2. **`2-invoke-endpoint.ipynb`** — Read your input CSV, batch the jobs, submit them to the endpoint, and save returned mmCIFs + confidence JSONs under `outputs/invoke_<timestamp>/`. The default points at `examples/structure_determination_input.csv`.
 3. **`4-score-dockq.ipynb`** — *(Optional, requires ground-truth CIFs.)* Score each returned structure against the experimental complex with DockQ. Outputs one row per prediction.
 4. **`5-predict-epitope.ipynb`** — Extract the predicted epitope (antigen residues in heavy-atom contact with the binder) for each returned structure. No ground truth required.
-5. **`3-cleanup-endpoint.ipynb`** — Delete the endpoint, endpoint config, and model when you are done. Stops incurring per-instance-hour charges.
+5. **`6-binding-score.ipynb`** — *(Optional.)* Rank candidate binders per antigen using the model's three binding-score signals (consensus percentile rank). No ground truth required.
+6. **`3-cleanup-endpoint.ipynb`** — Delete the endpoint, endpoint config, and model when you are done. Stops incurring per-instance-hour charges.
 
-Notebooks 4 and 5 are independent and can be run in either order; both consume the `cifs/` subdir written by notebook 2.
+Notebooks 4, 5, and 6 are independent and can be run in any order; they consume the `cifs/` and `confidence/` subdirs written by notebook 2.
 
 ## Recommended Instance
 
@@ -35,6 +36,7 @@ The model and its template database use a release-date cutoff of **2021-09-30**,
 - `3-cleanup-endpoint.ipynb`: delete the endpoint, endpoint config, and model when you are finished.
 - `4-score-dockq.ipynb`: score returned predictions against experimental ground-truth structures with DockQ, one row per prediction.
 - `5-predict-epitope.ipynb`: extract predicted epitope residues from returned complex structures (heavy-atom contact, no ground truth required).
+- `6-binding-score.ipynb`: rank candidate binders per antigen by consensus percentile rank over the model's three binding-score signals.
 
 Supporting Python helpers live in `src/`.
 
@@ -45,7 +47,9 @@ recommended sixth column (`exp_structure`) carries the ground-truth structure
 filename so predictions can be matched back during DockQ scoring. See
 `examples/structure_determination_input.csv` for a four-row example.
 
-Successful async inference returns a JSON object with a `predictions` list. Each prediction includes `cif_content` (an mmCIF string) and a `confidence.summary` object containing `iptm`, `plddt`, `ptm`, and related per-chain metrics.
+The `antigen_seq` and `binder_seq` columns may each list several chains separated by `/` (e.g. a multi-chain antigen or a VH/VL antibody). DockQ scoring (notebook 4) and binding-score (notebook 6) resolve and score every antigen chain (homo- and hetero-multimer antigens included); epitope prediction (notebook 5) reports the first antigen chain.
+
+Successful async inference returns a JSON object with a `predictions` list. Each prediction includes `cif_content` (an mmCIF string) and a `confidence.summary` object containing `iptm`, `plddt`, `ptm`, per-chain metrics, and three `binding_score_1/2/3` signals (`binding_score_2` requires an antibody binder).
 
 ## Setup
 

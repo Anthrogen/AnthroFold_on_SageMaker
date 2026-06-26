@@ -10,8 +10,8 @@ auto-detects the chain by exact polymer-sequence match against the antigen
 sequence from the input CSV row. AnthroFold preserves submitted polymer
 sequences verbatim in the returned mmCIF, so this match is deterministic and
 does not depend on any chain-ordering convention. ``ValueError`` is raised if
-the chain ID isn't present, no chain matches the antigen sequence, or
-multiple chains match (homo-multimer).
+the chain ID isn't present or no chain matches the antigen sequence; a
+homo-multimer antigen (several identical matching chains) resolves to the first.
 
 **Epitope definition.** A residue is on the epitope if **any** of its heavy
 atoms is within ``DEFAULT_EPITOPE_CONTACT_THRESHOLD_A`` Å of **any** heavy atom
@@ -45,48 +45,49 @@ def _chain_polymer_one_letter(chain) -> str:
     return "".join(out)
 
 
-def find_antigen_chain_id(cif_path: str, antigen_seq: str) -> str:
-    """Return the chain ID in ``cif_path`` whose polymer sequence exactly matches
-    ``antigen_seq``.
+def find_antigen_chain_ids(cif_path: str, antigen_seq: str) -> List[str]:
+    """Return **every** chain ID in ``cif_path`` whose polymer sequence matches
+    the antigen.
 
-    AnthroFold predictions always contain the exact submitted sequence on one
-    chain (the input is preserved into the output), so this is deterministic.
-    Raises ``ValueError`` if no chain matches or if multiple chains match (which
-    would indicate a duplicated antigen, e.g., a homodimer — caller should
-    label the chain explicitly in that case).
+    ``antigen_seq`` is the CSV antigen field and may be a single sequence or a
+    ``/``-separated list of sequences (a multi-chain antigen). This covers a
+    homo-multimer (one sequence appearing on several chains) and a
+    hetero-multimer (several different antigen chains) uniformly. AnthroFold
+    predictions preserve the submitted sequence verbatim, so the match is exact
+    and does not depend on chain ordering. Raises ``ValueError`` if no chain
+    matches any antigen sequence.
 
-    Note: this is for **predicted** CIFs where the sequence is known to round-trip
-    exactly. Ground-truth CIFs may have unresolved residues and won't exact-match
-    the input — for those, the caller must pass the chain ID directly to
-    ``predict_epitope``.
+    Note: this is for **predicted** CIFs where the sequence round-trips exactly.
+    Ground-truth CIFs may have unresolved residues and won't exact-match.
     """
-    target = antigen_seq.upper().replace(" ", "")
-    if not target:
+    targets = {s.upper().replace(" ", "") for s in antigen_seq.split("/") if s.strip()}
+    if not targets:
         raise ValueError(f"antigen_seq is empty for {cif_path}")
 
     structure = gemmi.read_structure(cif_path)
     structure.setup_entities()
-    model = structure[0]
 
     matches = []
     chain_summary = []
-    for chain in model:
+    for chain in structure[0]:
         seq = _chain_polymer_one_letter(chain)
         chain_summary.append(f"{chain.name}: {len(seq)} aa")
-        if seq == target:
+        if seq in targets:
             matches.append(chain.name)
 
     if not matches:
         raise ValueError(
-            f"No chain in {cif_path} exactly matches the antigen sequence "
-            f"(antigen length {len(target)}). Chains present: {chain_summary}"
+            f"No chain in {cif_path} matches the antigen sequence(s). "
+            f"Chains present: {chain_summary}"
         )
-    if len(matches) > 1:
-        raise ValueError(
-            f"Multiple chains in {cif_path} match the antigen sequence: {matches}. "
-            "Looks like a homo-multimer — call predict_epitope with one of these chain IDs directly."
-        )
-    return matches[0]
+    return matches
+
+
+def find_antigen_chain_id(cif_path: str, antigen_seq: str) -> str:
+    """Return a single antigen chain ID (the first match). See
+    ``find_antigen_chain_ids`` for the multi-chain version used by DockQ scoring.
+    """
+    return find_antigen_chain_ids(cif_path, antigen_seq)[0]
 
 
 def predict_epitope(

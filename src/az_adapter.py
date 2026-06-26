@@ -66,8 +66,9 @@ def csv_to_jobs(path):
         antigen_chains = _split_chains(row.get("antigen_seq", ""))
         binder_chains = _split_chains(row.get("binder_seq", ""))
         if not antigen_chains or not binder_chains:
+            empty = "antigen_seq" if not antigen_chains else "binder_seq"
             raise ValueError(
-                f"Row {i} in {path} is missing antigen_seq or binder_seq: {row!r}"
+                f"Row {i} (name={_job_name(row, i)!r}) in {path} has an empty {empty} column."
             )
         jobs.append(
             {

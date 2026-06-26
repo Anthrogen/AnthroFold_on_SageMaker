@@ -100,24 +100,24 @@ def dockq(
     native_chains=None,
     small_molecule=False,
     allowed_mismatches=0,
-    antigen_chain_id=None,
+    antigen_chain_ids=None,
 ):
     """Compute DockQ between a predicted structure and a native structure.
 
-    If ``antigen_chain_id`` is provided (the model chain ID of the antigen),
-    the returned ``best_result`` is filtered to only Ab-Ag interfaces — those
-    where one side of the interface is the antigen chain. The intra-antibody
-    (VH-VL) interface is excluded: it is usually well packed regardless of
-    antigen binding, and including it inflates the headline number. The
-    chain-mapping search still runs over all chains; we narrow the
-    per-interface report after the fact.
+    If ``antigen_chain_ids`` is provided (the model chain IDs of the antigen —
+    one, or several for a multi-chain antigen), the returned ``best_result`` is
+    filtered to only Ab-Ag interfaces — those where exactly one side is an
+    antigen chain. The intra-antibody (VH-VL) interface is excluded: it is
+    usually well packed regardless of antigen binding, and including it inflates
+    the headline number. The chain-mapping search still runs over all chains; we
+    narrow the per-interface report after the fact.
 
     Returns a dict with::
 
         {
           "model":         basename of the model file,
           "native":        basename of the native file,
-          "best_dockq":    mean per-interface DockQ across (filtered, if antigen_chain_id given)
+          "best_dockq":    mean per-interface DockQ across (filtered, if antigen_chain_ids given)
                            interfaces of the chosen mapping. Bounded [0, 1].
           "best_result":   per-interface detail dict,
           "best_mapping":  the chain mapping that maximised the (unfiltered) DockQ sum,
@@ -173,14 +173,22 @@ def dockq(
         best_mapping = next(chain_maps)
         best_result, best_dockq = run_chain_map(best_mapping)
 
-    if antigen_chain_id is not None and best_result:
-        ab_ag = {k: v for k, v in best_result.items() if antigen_chain_id in k.replace(":", " ").replace("-", " ").split() or (len(antigen_chain_id) == 1 and antigen_chain_id in k)}
-        if not ab_ag:
-            raise ValueError(
-                f"antigen_chain_id={antigen_chain_id!r} not present in any DockQ "
-                f"interface key. Interfaces found: {list(best_result)}"
-            )
-        best_result = ab_ag
+    if antigen_chain_ids is not None and best_result and best_mapping:
+        # best_result is keyed by the *native* interface chains and best_mapping
+        # is {native: model}, so resolve the antigen in native space — matching
+        # the model chain id against native keys breaks whenever the two
+        # structures letter their chains differently. antigen_chain_ids is the
+        # model chain id(s) of the antigen; find_antigen_chain_ids returns every
+        # chain of a homo- or hetero-multimer antigen. Keep interfaces where
+        # exactly one side is an antigen chain — scoring every antibody-to-
+        # antigen contact while dropping the intra-antibody (VH-VL) and
+        # antigen-antigen interfaces. If the antigen can't be resolved we keep
+        # all interfaces rather than failing.
+        native_antigens = {native for native, model in best_mapping.items() if model in antigen_chain_ids}
+        if native_antigens:
+            # May be empty if the antigen isn't at any interface -> best_dockq becomes
+            # None (honest), rather than silently scoring the wrong (e.g. VH-VL) interfaces.
+            best_result = {k: v for k, v in best_result.items() if len(set(k) & native_antigens) == 1}
 
     # Headline DockQ: mean across the reported interfaces (so the number is
     # bounded [0, 1] regardless of how many interfaces the complex has).

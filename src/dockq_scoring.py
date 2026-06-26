@@ -179,16 +179,27 @@ def dockq(
         # the model chain id against native keys breaks whenever the two
         # structures letter their chains differently. antigen_chain_ids is the
         # model chain id(s) of the antigen; find_antigen_chain_ids returns every
-        # chain of a homo- or hetero-multimer antigen. Keep interfaces where
-        # exactly one side is an antigen chain — scoring every antibody-to-
-        # antigen contact while dropping the intra-antibody (VH-VL) and
-        # antigen-antigen interfaces. If the antigen can't be resolved we keep
-        # all interfaces rather than failing.
+        # chain of a homo- or hetero-multimer antigen.
+        native_chains_present = set(best_mapping.keys())
         native_antigens = {native for native, model in best_mapping.items() if model in antigen_chain_ids}
-        if native_antigens:
-            # May be empty if the antigen isn't at any interface -> best_dockq becomes
-            # None (honest), rather than silently scoring the wrong (e.g. VH-VL) interfaces.
-            best_result = {k: v for k, v in best_result.items() if len(set(k) & native_antigens) == 1}
+
+        def _interface_chains(key):
+            # A DockQ interface key concatenates its two native chain IDs; split
+            # using the known native chains so multi-character chain IDs work too.
+            for i in range(1, len(key)):
+                a, b = key[:i], key[i:]
+                if a in native_chains_present and b in native_chains_present:
+                    return {a, b}
+            return set(key)  # single-character fallback
+
+        # Keep only Ab-Ag interfaces (exactly one side is an antigen chain) —
+        # scoring every antibody-to-antigen contact while dropping the
+        # intra-antibody (VH-VL) and antigen-antigen interfaces. If the antigen
+        # can't be mapped to a native chain, native_antigens is empty and this
+        # yields no interfaces -> best_dockq=None, rather than silently scoring
+        # all interfaces (incl. VH-VL).
+        best_result = {k: v for k, v in best_result.items()
+                       if len(_interface_chains(k) & native_antigens) == 1}
 
     # Headline DockQ: mean across the reported interfaces (so the number is
     # bounded [0, 1] regardless of how many interfaces the complex has).

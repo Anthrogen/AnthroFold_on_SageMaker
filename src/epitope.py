@@ -92,58 +92,65 @@ def find_antigen_chain_id(cif_path: str, antigen_seq: str) -> str:
 
 def predict_epitope(
     cif_path: str,
-    antigen_chain_id: str,
+    antigen_chain_ids,
     contact_threshold_a: float = DEFAULT_EPITOPE_CONTACT_THRESHOLD_A,
-) -> List[Tuple[int, str]]:
-    """Return the epitope residues for a single predicted complex.
+) -> List[Tuple[str, int, str]]:
+    """Return the epitope residues for a predicted complex.
 
-    An antigen residue is in the epitope if any of its heavy atoms is within
-    ``contact_threshold_a`` Å of any heavy atom on a chain whose ID is not
-    ``antigen_chain_id``.
+    ``antigen_chain_ids`` is an iterable of the antigen chain IDs (one, or
+    several for a multi-chain antigen; e.g. from ``find_antigen_chain_ids``). An
+    antigen residue is in the epitope if any of its heavy atoms is within
+    ``contact_threshold_a`` Å of any heavy atom on a chain that is NOT an antigen
+    chain (a binder chain). Excluding *all* antigen chains is what prevents
+    antigen-antigen contacts from being miscounted as epitope.
 
-    Returns a list of ``(residue_seq_id, residue_name)`` tuples in
-    primary-sequence order, where ``residue_seq_id`` is gemmi's
-    ``residue.seqid.num`` — the auth-seq-id from the CIF, which is consistent
-    between the predicted and native structures (any difference between them
-    is unresolved residues in the native, which simply do not appear in the
-    returned list).
+    Returns a list of ``(chain_id, residue_seq_id, residue_name)`` tuples in
+    primary-sequence order; ``residue_seq_id`` is gemmi's ``residue.seqid.num``
+    (the auth-seq-id, consistent between predicted and native structures).
 
-    Raises ``ValueError`` if no chain in the structure has the requested ID.
+    Raises ``ValueError`` if any antigen chain ID isn't present in the structure.
     """
+    antigen_ids = set(antigen_chain_ids)
+    if not antigen_ids:
+        raise ValueError("antigen_chain_ids is empty")
+
     structure = gemmi.read_structure(cif_path)
     structure.setup_entities()
     model = structure[0]
 
-    antigen_chain = model.find_chain(antigen_chain_id)
-    if antigen_chain is None:
-        available = [c.name for c in model]
+    present = {c.name for c in model}
+    missing = antigen_ids - present
+    if missing:
         raise ValueError(
-            f"Antigen chain {antigen_chain_id!r} not found in {cif_path}. "
-            f"Chains in the structure: {available}"
+            f"Antigen chain(s) {sorted(missing)} not found in {cif_path}. "
+            f"Chains in the structure: {sorted(present)}"
         )
 
     ns = gemmi.NeighborSearch(model, structure.cell, contact_threshold_a + 1.0)
     ns.populate(include_h=False)
 
-    epitope: List[Tuple[int, str]] = []
-    for residue in antigen_chain.get_polymer():
-        in_contact = False
-        for atom in residue:
-            if atom.element.name == "H":
-                continue
-            for mark in ns.find_atoms(atom.pos, "\0", radius=contact_threshold_a):
-                cra = mark.to_cra(model)
-                if cra.chain.name == antigen_chain_id:
-                    continue  # same-chain neighbor (incl. query atom itself)
-                if cra.residue.entity_type != gemmi.EntityType.Polymer:
-                    continue  # skip waters / ligands / ions / glycans
-                if atom.pos.dist(cra.atom.pos) <= contact_threshold_a:
-                    in_contact = True
+    epitope: List[Tuple[str, int, str]] = []
+    for chain in model:
+        if chain.name not in antigen_ids:
+            continue
+        for residue in chain.get_polymer():
+            in_contact = False
+            for atom in residue:
+                if atom.element.name == "H":
+                    continue
+                for mark in ns.find_atoms(atom.pos, "\0", radius=contact_threshold_a):
+                    cra = mark.to_cra(model)
+                    if cra.chain.name in antigen_ids:
+                        continue  # self or another antigen chain — not a binder contact
+                    if cra.residue.entity_type != gemmi.EntityType.Polymer:
+                        continue  # skip waters / ligands / ions / glycans
+                    if atom.pos.dist(cra.atom.pos) <= contact_threshold_a:
+                        in_contact = True
+                        break
+                if in_contact:
                     break
             if in_contact:
-                break
-        if in_contact:
-            epitope.append((residue.seqid.num, residue.name.upper().strip()))
+                epitope.append((chain.name, residue.seqid.num, residue.name.upper().strip()))
     return epitope
 
 

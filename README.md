@@ -8,7 +8,7 @@ The model package and SageMaker endpoint are hosted in `us-east-1`. You can run 
 
 The six notebooks are intended to be run in order:
 
-1. **`1-deploy-endpoint.ipynb`** — Stand up an async SageMaker endpoint from the model package ARN. Documents the input CSV format. Writes `endpoint_name.txt` for the other notebooks to read. Initial deployment takes ~1 hour while the container downloads bundled MSA databases (see [Cold Start](#cold-start)).
+1. **`1-deploy-endpoint.ipynb`** — Subscribe to the AnthroFold AWS Marketplace listing, then stand up an async endpoint from its model package ARN. Documents the input CSV format and writes `endpoint_name.txt` for the other notebooks. First deploy takes ~1 hour while the container loads the bundled MSA databases (see [Cold Start](#cold-start)).
 2. **`2-invoke-endpoint.ipynb`** — Read your input CSV, batch the jobs, submit them to the endpoint, and save returned mmCIFs + confidence JSONs under `outputs/invoke_<timestamp>/`. The default points at `examples/structure_determination_input.csv`.
 3. **`4-score-dockq.ipynb`** — *(Optional, requires ground-truth CIFs.)* Score each returned structure against the experimental complex with DockQ. Outputs one row per prediction.
 4. **`5-predict-epitope.ipynb`** — Extract the predicted epitope (antigen residues in heavy-atom contact with the binder) for each returned structure. No ground truth required.
@@ -19,11 +19,11 @@ Notebooks 4, 5, and 6 are independent and can be run in any order; they consume 
 
 ## Recommended Instance
 
-For the full antibody-antigen size range of 2048 total residues, use an instance with 80 GB-class GPU memory, for example `ml.p4de.24xlarge` (8× A100 80 GB) or `ml.p5.48xlarge` (8× H100 80 GB). Verify your endpoint quota for the chosen instance type before deploying. Smaller shapes such as `ml.g5.12xlarge` (4× A10G 24 GB) can serve smaller complexes if capacity for the 80 GB instances isn't available.
+The async endpoint runs on one of the listing's supported instance types: `ml.p5.48xlarge` (8× H100), `ml.p4de.24xlarge` (8× A100 80 GB), or `ml.p5e.48xlarge` (8× H200). Endpoint quota for these is often 0 by default — request an increase before deploying.
 
 ## Cold Start
 
-Initial endpoint startup typically takes about 1 hour while the container downloads the bundled MSA databases. Per-example runtime is then about 5-10 minutes depending on complex size. If deployment fails due to insufficient capacity, the deploy cell cleans up the failed resources and exits — simply re-run the deploy cell to try again.
+Initial endpoint startup takes about 1 hour while the container loads the bundled MSA databases. Per-example runtime is then 5-10 minutes depending on complex size. If deployment fails due to insufficient capacity, the deploy cell cleans up and exits — re-run it to try again.
 
 ## Training and Template Cutoff
 

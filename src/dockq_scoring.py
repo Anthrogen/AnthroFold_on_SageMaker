@@ -1,20 +1,13 @@
-"""DockQ scoring helper, vendored from FoldBench's evaluation/eval_by_dockqv2.py.
+"""DockQ scoring helper.
 
-The wrapper logic (chain-type detection, het-residue reformatting, best-mapping
-search across chain permutations) is preserved so that per-interface DockQ /
-LRMSD / iRMSD / Fnat values match what FoldBench produces on the same input.
-The underlying DockQ implementation comes from the public ``DockQ`` PyPI
-package (https://github.com/bjornwallner/DockQ), so this repository can use
-``pip install DockQ`` without needing the FoldBench tree.
+A wrapper around the public ``DockQ`` package
+(https://github.com/bjornwallner/DockQ) that adds chain-type detection,
+modified-residue handling, and a best-mapping search over chain permutations, so
+that model and native chains are paired correctly before scoring.
 
-The headline ``best_dockq`` returned by ``dockq()`` here is a *mean* across
-the reported interfaces (bounded [0, 1]), which is a convenience this wrapper
-adds — FoldBench's original writes one row per interface and doesn't aggregate.
-
-The original FoldBench file also includes a multiprocessing harness that reads
-prediction CSVs and writes detail JSONs; that orchestration is intentionally
-not vendored. Callers should drive ``dockq()`` directly per (model, native)
-pair.
+The headline ``best_dockq`` returned by ``dockq()`` is the mean across the
+reported interfaces, bounded [0, 1]. Drive ``dockq()`` directly per
+(model, native) pair.
 """
 
 import itertools

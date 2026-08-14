@@ -8,7 +8,7 @@ venv/
 outputs/
 *.cif
 *.pdb
-!examples/exp_structures/*.cif
+!examples/**/exp_structures/*.cif
 aws_creds/
 .aws_creds/
 
@@ -16,8 +16,14 @@ aws_creds/
 *.executed.ipynb
 *.log
 endpoint_name.txt
+msa_endpoint_name.txt
+msa_endpoint_state.json
+.anthrofold-msa.lock
+.*.anthrofold-msa.lock
 
 # internal-only
 tests/
 FORWARD_PLAN.md
 .pytest_cache/
+test/
+outputs_archive/

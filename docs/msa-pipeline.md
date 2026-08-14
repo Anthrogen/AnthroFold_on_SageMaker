@@ -43,7 +43,7 @@ That directory will contain the generated CSV and its `msas/` folder.
 
 ## What you need
 
-- A Marketplace subscription that lets your account see the MSA model package.
+- Access to the MSA model package from your account, and the ARN you were given.
 - A SageMaker execution role that can pull the package and read its database, plus
   an S3 bucket the client can write requests to and read results from. The standard
   role is scoped to buckets named `sagemaker-*`.
@@ -137,9 +137,8 @@ python src/msa_client.py --input complex_input.csv
 When the lifecycle client was used, that is the whole command: endpoint name and
 bucket are discovered from its sidecar/state. You can still pass `--endpoint-name`
 and `--bucket`, or set `ANTHROFOLD_MSA_ENDPOINT_NAME`, when targeting an endpoint
-created elsewhere. Before waiting, the client verifies that the target is an async
-AnthroFold MSA-search endpoint with network isolation disabled and concurrency one;
-accidentally naming the folding endpoint therefore fails immediately.
+created elsewhere. Before waiting, the client confirms the endpoint is async. It
+does not check the model package: that ARN changes with each new version.
 
 | Flag | Default | Notes |
 |---|---|---|
@@ -218,7 +217,7 @@ package author's recommended default and usually keeps the inline-a3m result nea
 15–20 MB. Search time depends strongly on the sequences; the client prints a
 heartbeat every minute rather than estimating completion from sequence count.
 
-In the 313-sequence FoldBench validation, 312 searched sequences produced 78
+In a 313-sequence validation run, 312 searched sequences produced 78
 four-sequence requests. Client-visible time per request was 3.1 minutes at the
 median and 4.9 minutes at p95, with a 0.8–6.2 minute observed range. The 78
 sequential requests totaled about 4 hours 4 minutes. Use these as planning

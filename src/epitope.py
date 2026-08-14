@@ -27,6 +27,7 @@ the direct epitope analogue of DockQ's Fnat (fraction of native contact
 residues recovered); F1 is the headline summary number.
 """
 
+import re
 from typing import Dict, Iterable, List, Tuple
 
 import gemmi
@@ -60,7 +61,8 @@ def find_antigen_chain_ids(cif_path: str, antigen_seq: str) -> List[str]:
     Note: this is for **predicted** CIFs where the sequence round-trips exactly.
     Ground-truth CIFs may have unresolved residues and won't exact-match.
     """
-    targets = {s.upper().replace(" ", "") for s in antigen_seq.split("/") if s.strip()}
+    # '|' is the CSV chain separator; '/' is still accepted for older CSVs.
+    targets = {s.upper().replace(" ", "") for s in re.split(r"[|/]", antigen_seq) if s.strip()}
     if not targets:
         raise ValueError(f"antigen_seq is empty for {cif_path}")
 

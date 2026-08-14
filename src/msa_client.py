@@ -47,6 +47,7 @@ from msa_endpoint import (DEFAULT_READY_TIMEOUT, DEFAULT_SIDECAR,
 # varies substantially with the sequences. The package's own serving guide
 # recommends four sequences so typical inline-a3m responses stay around 15--20 MB.
 SEQUENCES_PER_REQUEST = 4
+
 DEFAULT_MAX_INVOCATION_ATTEMPTS = 3
 DEFAULT_INVOCATION_RETRY_SECONDS = 15
 # This client submits one request at a time to an endpoint configured for one
@@ -432,38 +433,23 @@ def resolve_endpoint_name(explicit=None, sidecar=DEFAULT_SIDECAR, state=None):
 
 
 def endpoint_async_config(sm, endpoint_name):
-    """Return and validate the MSA endpoint's serving configuration."""
+    """Return the endpoint's async serving configuration.
+
+    Only the async contract is checked: this client submits with
+    InvokeEndpointAsync and reads the result from S3, so a real-time endpoint
+    cannot serve it. The model package, its concurrency and its network settings
+    belong to whoever deployed the endpoint — a serving endpoint has already
+    proved they work, and the package ARN changes with every new version, rename
+    or Marketplace listing.
+    """
     endpoint = sm.describe_endpoint(EndpointName=endpoint_name)
-    config_name = endpoint["EndpointConfigName"]
-    config = sm.describe_endpoint_config(EndpointConfigName=config_name)
+    config = sm.describe_endpoint_config(
+        EndpointConfigName=endpoint["EndpointConfigName"])
     async_config = config.get("AsyncInferenceConfig")
     if not async_config:
-        raise RuntimeError(f"Endpoint {endpoint_name} is not an async endpoint.")
-    concurrency = async_config.get("ClientConfig", {}).get(
-        "MaxConcurrentInvocationsPerInstance"
-    )
-    if concurrency != 1:
         raise RuntimeError(
-            f"Endpoint {endpoint_name} has MaxConcurrentInvocationsPerInstance="
-            f"{concurrency!r}; the MSA package requires 1."
-        )
-    variants = config.get("ProductionVariants") or []
-    model_name = variants[0].get("ModelName") if len(variants) == 1 else None
-    if not model_name:
-        raise RuntimeError(
-            f"Endpoint {endpoint_name} does not have exactly one model variant."
-        )
-    model = sm.describe_model(ModelName=model_name)
-    package_name = (model.get("PrimaryContainer") or {}).get("ModelPackageName", "")
-    if ":model-package/anthrofold-msa-search/" not in package_name:
-        raise RuntimeError(
-            f"Endpoint {endpoint_name} uses model package {package_name or '<unknown>'}, "
-            "not an AnthroFold MSA-search package. Check --endpoint-name."
-        )
-    if model.get("EnableNetworkIsolation") is not False:
-        raise RuntimeError(
-            f"Endpoint {endpoint_name} has network isolation enabled; the MSA "
-            "package requires network access for its database setup."
+            f"Endpoint {endpoint_name} is not an async endpoint. This client submits "
+            "with InvokeEndpointAsync and reads the result from S3."
         )
     return async_config
 

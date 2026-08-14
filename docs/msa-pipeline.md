@@ -11,6 +11,12 @@ This document is for whoever runs that step. If you are running the notebooks an
 someone has already given you a CSV and an `msas/` folder, you do not need any of
 this — see the README.
 
+> [!IMPORTANT]
+> The MSA endpoint must run with SageMaker network isolation disabled. At startup,
+> the container downloads the pinned ColabFold database from S3. Enabling network
+> isolation blocks that S3 access and the service cannot initialize. The deployment
+> helper sets the required value automatically.
+
 ## Quick start
 
 ```bash
@@ -43,11 +49,14 @@ That directory will contain the generated CSV and its `msas/` folder.
 
 ## What you need
 
-- Access to the MSA model package from your account, and the ARN you were given.
-- A SageMaker execution role that can pull the package and read its database, plus
-  an S3 bucket the client can write requests to and read results from. The standard
-  role is scoped to buckets named `sagemaker-*`.
-- Credentials for the person deploying, with `sagemaker:CreateModel`,
+- Your 12-digit AWS account ID must be allowlisted by Anthrogen for the MSA Model
+  Package and its ECR repository. Anthrogen grants this access directly to the
+  customer account.
+- A SageMaker execution role that can pull the package's ECR image, read the
+  shared database, and access the async input/output bucket. A minimal trust and
+  permissions example appears below.
+- Credentials for the person deploying, with `sagemaker:DescribeModelPackage`,
+  `sagemaker:CreateModel`,
   `sagemaker:CreateEndpointConfig`, `sagemaker:CreateEndpoint`, `iam:PassRole`,
   `sagemaker:InvokeEndpointAsync`, and the matching describe/delete permissions.
   The caller also needs `s3:ListBucket` / `s3:GetBucketLocation` and object
@@ -57,6 +66,111 @@ That directory will contain the generated CSV and its `msas/` folder.
   `sagemaker:DescribeEndpoint`, `sagemaker:DescribeEndpointConfig`, and
   `sagemaker:DescribeModel`, and read/write access to the async S3 bucket.
 - Python 3 with `boto3` (included in `requirements.txt`).
+
+### Verify account and package access
+
+Run this before creating resources. The account printed by the first command must
+be the account Anthrogen allowlisted. The package check should report
+`Completed` and `Approved`:
+
+```bash
+aws sts get-caller-identity
+
+aws sagemaker describe-model-package \
+  --model-package-name \
+  arn:aws:sagemaker:us-east-1:038462780959:model-package/anthrofold-msa-search/2 \
+  --region us-east-1 \
+  --query '{Status:ModelPackageStatus,Approval:ModelApprovalStatus}'
+```
+
+An `AccessDenied` response means either the account has not been allowlisted or
+the current IAM identity does not have `sagemaker:DescribeModelPackage`.
+
+### SageMaker execution role
+
+The role passed to `--role-arn` must trust SageMaker:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [{
+    "Effect": "Allow",
+    "Principal": {"Service": "sagemaker.amazonaws.com"},
+    "Action": "sts:AssumeRole"
+  }]
+}
+```
+
+Attach permissions like the following. Replace `<customer-bucket>` with the async
+input/output bucket in the same `us-east-1` Region:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Sid": "AuthenticateToEcr",
+      "Effect": "Allow",
+      "Action": "ecr:GetAuthorizationToken",
+      "Resource": "*"
+    },
+    {
+      "Sid": "PullMsaImage",
+      "Effect": "Allow",
+      "Action": [
+        "ecr:BatchCheckLayerAvailability",
+        "ecr:BatchGetImage",
+        "ecr:GetDownloadUrlForLayer",
+        "ecr:DescribeImages"
+      ],
+      "Resource": "arn:aws:ecr:us-east-1:038462780959:repository/anthrofold-msa-search"
+    },
+    {
+      "Sid": "ListMsaDatabase",
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::anthrofold-prod",
+      "Condition": {
+        "StringLike": {
+          "s3:prefix": [
+            "databases/colabfold",
+            "databases/colabfold/*"
+          ]
+        }
+      }
+    },
+    {
+      "Sid": "ReadMsaDatabase",
+      "Effect": "Allow",
+      "Action": "s3:GetObject",
+      "Resource": "arn:aws:s3:::anthrofold-prod/databases/colabfold/*"
+    },
+    {
+      "Sid": "InspectAsyncBucket",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetBucketLocation",
+        "s3:ListBucket"
+      ],
+      "Resource": "arn:aws:s3:::<customer-bucket>"
+    },
+    {
+      "Sid": "UseAsyncObjects",
+      "Effect": "Allow",
+      "Action": [
+        "s3:GetObject",
+        "s3:PutObject",
+        "s3:AbortMultipartUpload"
+      ],
+      "Resource": "arn:aws:s3:::<customer-bucket>/*"
+    }
+  ]
+}
+```
+
+Cross-account access requires both sides: Anthrogen grants the customer account
+access to the Model Package, image, and database, while the customer administrator
+grants its caller and execution role the corresponding IAM permissions.
 
 ## Deploying the MSA endpoint
 
@@ -100,7 +214,14 @@ capacity and database-preparation progress.
 SageMaker can report `InService` before the database preparation is complete. The
 deploy client therefore waits beyond that state and finishes with a small
 end-to-end async request. It declares success only after that request returns a
-valid MSA. It writes:
+valid MSA. During initialization, the decisive CloudWatch messages are:
+
+```text
+AnthroFold MSA Search is ready
+Failed to initialize MSA service
+```
+
+It writes:
 
 ```
 msa_endpoint_state.json   # created immediately; enough to resume/status/delete

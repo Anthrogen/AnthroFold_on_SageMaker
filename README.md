@@ -136,6 +136,12 @@ The async endpoint runs on one of the listing's supported instance types: `ml.p4
 
 Initial endpoint startup takes about 1 hour while the container loads its model weights and reference data. Per-example runtime is then 5-10 minutes depending on complex size. If deployment fails due to insufficient capacity, the deploy cell cleans up and exits — re-run it to try again.
 
+The deploy notebook enables SageMaker network isolation explicitly: the folding
+container does not need outbound network access after its packaged model data has
+been attached. Async success and failure outputs use separate S3 paths, and
+notebook 2 rejects empty, partial, duplicate, or malformed prediction responses
+instead of treating a delivered JSON object as a successful batch.
+
 ## Training and Template Cutoff
 
 The model and its template database use a release-date cutoff of **2021-09-30**, matching the AlphaFold 3 training and inference protocol. Templates from PDB entries released after this date are filtered out during inference.

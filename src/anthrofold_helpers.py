@@ -497,9 +497,82 @@ def wait_for_result(
     )
 
 
+def validate_prediction_result(result, expected_names=None):
+    """Fail closed unless an async response contains every expected prediction.
+
+    SageMaker successfully delivering a JSON object only proves that the serving
+    request completed. It does not prove that every job produced a structure: an
+    empty or partial ``predictions`` list is still valid JSON. Validate the result
+    before any output files are written so missing work cannot look successful.
+    """
+    if not isinstance(result, dict):
+        raise ValueError(
+            f"Inference result must be a JSON object, got {type(result).__name__}."
+        )
+
+    predictions = result.get("predictions")
+    if not isinstance(predictions, list):
+        raise ValueError("Inference result must contain a 'predictions' list.")
+    if not predictions:
+        raise ValueError("Inference result contains no predictions.")
+
+    returned_names = []
+    seen_names = set()
+    for index, pred in enumerate(predictions):
+        if not isinstance(pred, dict):
+            raise ValueError(
+                f"Prediction {index} must be a JSON object, got "
+                f"{type(pred).__name__}."
+            )
+
+        name = pred.get("name")
+        if not isinstance(name, str) or not name.strip():
+            raise ValueError(f"Prediction {index} has no non-empty string name.")
+        if name in seen_names:
+            raise ValueError(f"Inference result repeats prediction name {name!r}.")
+        seen_names.add(name)
+        returned_names.append(name)
+
+        cif_content = pred.get("cif_content")
+        if not isinstance(cif_content, str) or not cif_content.strip():
+            raise ValueError(f"Prediction {name!r} has no non-empty cif_content.")
+        if re.search(r"(?m)^\s*data_", cif_content) is None:
+            raise ValueError(
+                f"Prediction {name!r} cif_content does not look like an mmCIF file."
+            )
+
+        confidence = pred.get("confidence")
+        if not isinstance(confidence, dict) or not confidence:
+            raise ValueError(f"Prediction {name!r} has no confidence data.")
+        summary = confidence.get("summary", confidence)
+        if not isinstance(summary, dict) or not summary:
+            raise ValueError(f"Prediction {name!r} has no confidence summary.")
+
+    if expected_names is not None:
+        expected = list(expected_names)
+        if not expected:
+            raise ValueError("expected_names must not be empty.")
+        if any(not isinstance(name, str) or not name.strip() for name in expected):
+            raise ValueError("Every expected prediction name must be a non-empty string.")
+        if len(set(expected)) != len(expected):
+            raise ValueError("Expected prediction names must be unique.")
+
+        missing = sorted(set(expected) - seen_names)
+        extra = sorted(seen_names - set(expected))
+        if missing or extra or len(returned_names) != len(expected):
+            raise ValueError(
+                "Inference result does not match the submitted jobs: "
+                f"expected={len(expected)}, returned={len(returned_names)}, "
+                f"missing={missing}, extra={extra}."
+            )
+
+    return predictions
+
+
 def summarize_predictions(result):
+    predictions = validate_prediction_result(result)
     rows = []
-    for pred in result.get("predictions") or []:
+    for pred in predictions:
         conf = pred.get("confidence", {}) or {}
         summary = conf.get("summary", conf)  # handler may nest metrics under 'summary' or return them flat
         rows.append(
@@ -517,6 +590,7 @@ def summarize_predictions(result):
 
 
 def save_predictions(result, output_dir="outputs", prefix=None):
+    predictions = validate_prediction_result(result)
     output = Path(output_dir)
     cif_dir = output / "cifs"
     confidence_dir = output / "confidence"
@@ -524,7 +598,7 @@ def save_predictions(result, output_dir="outputs", prefix=None):
     confidence_dir.mkdir(parents=True, exist_ok=True)
 
     saved = []
-    for pred in result.get("predictions") or []:
+    for pred in predictions:
         name = safe_name(str(pred.get("name", "prediction")))
         stem = f"{safe_name(prefix)}_{name}" if prefix else name
         cif_path = cif_dir / f"{stem}.cif"
